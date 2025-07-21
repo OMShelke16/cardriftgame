@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Car Football Game - Neon Night Edition</title>
+    <style>
+        body {
+            background: linear-gradient(135deg, #0f2027 0%, #2c5364 100%);
+            margin: 0;
+            overflow: hidden;
+        }
+        #gameCanvas {
+            display: block;
+            margin: 0 auto;
+            background: #181c2b;
+            border: 3px solid #00fff7;
+            box-shadow: 0 0 40px #00fff7, 0 0 80px #ff00cc inset;
+        }
+        #info {
+            color: #fff;
+            text-align: center;
+            font-family: 'Orbitron', Arial, sans-serif;
+            margin-top: 10px;
+            text-shadow: 0 0 8px #00fff7, 0 0 2px #ff00cc;
+        }
+        .scoreboard {
+            font-size: 1.4em;
+            margin-bottom: 5px;
+            letter-spacing: 2px;
+            text-shadow: 0 0 10px #00fff7, 0 0 2px #ff00cc;
+        }
+        #powerupInfo {
+            margin-top: 8px;
+            font-size: 1.1em;
+            color: #ffd700;
+            text-shadow: 0 0 6px #ff00cc;
+        }
+        #timer {
+            font-size: 1.2em;
+            color: #00fff7;
+            margin-top: 8px;
+            text-shadow: 0 0 8px #00fff7;
+        }
+        /* Neon button style for future expansion */
+        .neon-btn {
+            background: #181c2b;
+            color: #00fff7;
+            border: 2px solid #ff00cc;
+            border-radius: 8px;
+            padding: 8px 18px;
+            font-family: 'Orbitron', Arial, sans-serif;
+            font-size: 1em;
+            box-shadow: 0 0 10px #ff00cc, 0 0 20px #00fff7 inset;
+            cursor: pointer;
+            transition: background 0.2s, color 0.2s;
+        }
+        .neon-btn:hover {
+            background: #ff00cc;
+            color: #fff;
+        }
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700&display=swap');
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas" width="800" height="500"></canvas>
+    <div id="info">
+        <div class="scoreboard">
+            <span style="color:#ff3333; text-shadow:0 0 10px #ff3333;">Red</span> <span id="score1">0</span> : <span id="score2">0</span> <span style="color:#3399ff; text-shadow:0 0 10px #3399ff;">Blue</span>
+        </div>
+        <b>Controls:</b><br>
+        <span style="color:#ff3333; text-shadow:0 0 8px #ff3333;">Red Car</span>: Arrow keys to move, Space to brake/drift.<br>
+        <span style="color:#3399ff; text-shadow:0 0 8px #3399ff;">Blue Car</span>: WASD to move, Shift to brake/drift.<br>
+        <span id="speed"></span>
+        <div id="timer"></div>
+        <div id="powerupInfo"></div>
+    </div>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Football field parameters
+        const field = {
+            x: 60,
+            y: 40,
+            width: 680,
+            height: 420,
+            goalWidth: 120,
+            goalDepth: 30
+        };
+
+        // Car parameters
+        function createCar(x, y, angle, color, neonColor) {
+            return {
+                x: x,
+                y: y,
+                width: 40,
+                height: 20,
+                angle: angle,
+                speed: 0,
+                maxSpeed: 6,
+                accel: 0.16,
+                friction: 0.04,
+                driftFriction: 0.12,
+                turnSpeed: 0.045,
+                driftTurn: 0.09,
+                drifting: false,
+                color: color,
+                neon: neonColor,
+                score: 0,
+                powerup: null,
+                powerupTimer: 0
+            };
+        }
+
+        const car1 = createCar(field.x + 120, field.y + field.height / 2, 0, "#ff3333", "#ff00cc"); // Red
+        const car2 = createCar(field.x + field.width - 120, field.y + field.height / 2, Math.PI, "#3399ff", "#00fff7"); // Blue
+
+        // Ball parameters
+        const ball = {
+            x: field.x + field.width / 2,
+            y: field.y + field.height / 2,
+            radius: 18,
+            color: "#fff",
+            speedX: 0,
+            speedY: 0,
+            maxSpeed: 7,
+            friction: 0.98
+        };
+
+        // Powerup parameters
+        const powerupTypes = [
+            { type: "BOOST", color: "#ffd700", desc: "Speed Boost" },
+            { type: "SHIELD", color: "#00e5ff", desc: "Shield" },
+            { type: "MEGABALL", color: "#ff00cc", desc: "Mega Ball" }
+        ];
+        let powerup = null;
+        let powerupTimer = 0;
+
+        function spawnPowerup() {
+            // Place powerup randomly on the field, not too close to goals
+            const margin = 60;
+            const px = Math.random() * (field.width - 2 * margin) + field.x + margin;
+            const py = Math.random() * (field.height - 2 * margin) + field.y + margin;
+            const ptype = powerupTypes[Math.floor(Math.random() * powerupTypes.length)];
+            powerup = {
+                x: px,
+                y: py,
+                radius: 16,
+                ...ptype
+            };
+            powerupTimer = 0;
+        }
+
+        // Input state
+        const keys = {
+            // Car 1 (Red) - Arrow keys + Space
+            ArrowUp: false,
+            ArrowDown: false,
+            ArrowLeft: false,
+            ArrowRight: false,
+            Space: false,
+            // Car 2 (Blue) - WASD + ShiftLeft
+            KeyW: false,
+            KeyS: false,
+            KeyA: false,
+            KeyD: false,
+            ShiftLeft: false,
+            // Powerup activation
+            Enter: false,
+            ControlLeft: false
+        };
+
+        // Listen for key events
+        document.addEventListener('keydown', e => {
+            if (e.code in keys) keys[e.code] = true;
+        });
+        document.addEventListener('keyup', e => {
+            if (e.code in keys) keys[e.code] = false;
+        });
+
+        // Timer for match
+        let matchTime = 120; // seconds
+        let lastTimestamp = null;
+        let gameEnded = false;
+
+        function drawField() {
+            // Neon field background
+            // Draw a dark field with glowing neon lines
+            ctx.save();
+            // Field base
+            ctx.fillStyle = "#181c2b";
+            ctx.fillRect(field.x, field.y, field.width, field.height);
+
+            // Neon border
+            ctx.shadowColor = "#00fff7";
+            ctx.shadowBlur = 18;
+            ctx.strokeStyle = "#00fff7";
+            ctx.lineWidth = 6;
+            ctx.strokeRect(field.x, field.y, field.width, field.height);
+
+            ctx.shadowBlur = 0;
+
+            // Center line (neon)
+            ctx.strokeStyle = "#ff00cc";
+            ctx.lineWidth = 3;
+            ctx.shadowColor = "#ff00cc";
+            ctx.shadowBlur = 10;
+            ctx.beginPath();
+            ctx.moveTo(field.x + field.width / 2, field.y);
+            ctx.lineTo(field.x + field.width / 2, field.y + field.height);
+            ctx.stroke();
+
+            // Center circle (neon)
+            ctx.beginPath();
+            ctx.arc(field.x + field.width / 2, field.y + field.height / 2, 60, 0, 2 * Math.PI);
+            ctx.stroke();
+
+            ctx.shadowBlur = 0;
+
+            // Goals (neon)
+            // Left goal
+            ctx.fillStyle = "#00fff7";
+            ctx.shadowColor = "#00fff7";
+            ctx.shadowBlur = 20;
+            ctx.fillRect(field.x - field.goalDepth, field.y + (field.height - field.goalWidth) / 2, field.goalDepth, field.goalWidth);
+            // Right goal
+            ctx.fillRect(field.x + field.width, field.y + (field.height - field.goalWidth) / 2, field.goalDepth, field.goalWidth);
+
+            ctx.shadowBlur = 0;
+            ctx.restore();
+        }
+
+        function drawCar(car) {
+            ctx.save();
+            ctx.translate(car.x, car.y);
+            ctx.rotate(car.angle);
+
+            // Neon underglow
+            ctx.save();
+            ctx.globalAlpha = 0.7;
+            ctx.shadowColor = car.neon;
+            ctx.shadowBlur = car.drifting ? 40 : 20;
+            ctx.fillStyle = car.neon;
+            ctx.beginPath();
+            ctx.ellipse(0, 0, car.width * 0.7, car.height * 0.7, 0, 0, 2 * Math.PI);
+            ctx.fill();
+            ctx.restore();
+
+            // Car body (neon edge)
+            ctx.save();
+            ctx.shadowColor = car.neon;
+            ctx.shadowBlur = 12;
+            ctx.fillStyle = car.drifting ? "#ffd700" : car.color;
+            ctx.fillRect(-car.width/2, -car.height/2, car.width, car.height);
+            ctx.restore();
+
+            // Car details (windows)
+            ctx.fillStyle = "#222";
+            ctx.fillRect(-car.width/4, -car.height/4, car.width/2, car.height/2);
+
+            // Wheels (neon)
+            ctx.save();
+            ctx.shadowColor = car.neon;
+            ctx.shadowBlur = 8;
+            ctx.fillStyle = "#111";
+            ctx.fillRect(-car.width/2, -car.height/2-4, 10, 8);
+            ctx.fillRect(car.width/2-10, -car.height/2-4, 10, 8);
+            ctx.fillRect(-car.width/2, car.height/2-4, 10, 8);
+            ctx.fillRect(car.width/2-10, car.height/2-4, 10, 8);
+            ctx.restore();
+
+            // Draw shield if active (neon blue)
+            if (car.powerup === "SHIELD" && car.powerupTimer > 0) {
+                ctx.beginPath();
+                ctx.arc(0, 0, car.width, 0, 2 * Math.PI);
+                ctx.strokeStyle = "#00e5ff";
+                ctx.lineWidth = 5;
+                ctx.globalAlpha = 0.8;
+                ctx.shadowColor = "#00e5ff";
+                ctx.shadowBlur = 18;
+                ctx.stroke();
+                ctx.globalAlpha = 1;
+                ctx.shadowBlur = 0;
+            }
+
+            ctx.restore();
+        }
+
+        function drawBall() {
+            ctx.save();
+            // Neon ball glow
+            ctx.shadowColor = ball.color === "#fff" ? "#ffd700" : ball.color;
+            ctx.shadowBlur = ball.radius + 10;
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, ball.radius, 0, 2 * Math.PI);
+            ctx.fillStyle = ball.color;
+            ctx.fill();
+            ctx.shadowBlur = 0;
+
+            // Ball details (neon football pattern)
+            ctx.strokeStyle = "#ff00cc";
+            ctx.lineWidth = 2;
+            ctx.globalAlpha = 0.7;
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, ball.radius * 0.5, 0, 2 * Math.PI);
+            ctx.stroke();
+            ctx.globalAlpha = 1;
+
+            // Mega Ball effect (extra neon ring)
+            if (ball.megaTimer && ball.megaTimer > 0) {
+                ctx.beginPath();
+                ctx.arc(ball.x, ball.y, ball.radius + 10, 0, 2 * Math.PI);
+                ctx.strokeStyle = "#ff00cc";
+                ctx.lineWidth = 4;
+                ctx.globalAlpha = 0.6 + 0.4 * Math.sin(Date.now()/200);
+                ctx.shadowColor = "#ff00cc";
+                ctx.shadowBlur = 18;
+                ctx.stroke();
+                ctx.globalAlpha = 1;
+                ctx.shadowBlur = 0;
+            }
+
+            ctx.restore();
+        }
+
+        function drawPowerup() {
+            if (!powerup) return;
+            ctx.save();
+            ctx.shadowColor = powerup.color;
+            ctx.shadowBlur = 18;
+            ctx.beginPath();
+            ctx.arc(powerup.x, powerup.y, powerup.radius, 0, 2 * Math.PI);
+            ctx.fillStyle = powerup.color;
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            ctx.strokeStyle = "#fff";
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            ctx.font = "bold 15px 'Orbitron', Arial, sans-serif";
+            ctx.fillStyle = "#222";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(powerup.type, powerup.x, powerup.y);
+            ctx.restore();
+        }
+
+        function updateCar(car, controls, activateKey) {
+            // Acceleration and braking
+            if (keys[controls.up]) {
+                car.speed += car.accel;
+            } else if (keys[controls.down]) {
+                car.speed -= car.accel * 0.7;
+            } else {
+                // Friction
+                car.speed *= (1 - (car.drifting ? car.driftFriction : car.friction));
+            }
+
+            // Clamp speed
+            if (car.speed > car.maxSpeed) car.speed = car.maxSpeed;
+            if (car.speed < -car.maxSpeed/2) car.speed = -car.maxSpeed/2;
+
+            // Drifting
+            car.drifting = keys[controls.drift] && Math.abs(car.speed) > 1;
+
+            // Steering
+            let turn = car.drifting ? car.driftTurn : car.turnSpeed;
+            if (keys[controls.left]) {
+                car.angle -= turn * (car.speed/2);
+            }
+            if (keys[controls.right]) {
+                car.angle += turn * (car.speed/2);
+            }
+
+            // Move car
+            car.x += Math.cos(car.angle) * car.speed;
+            car.y += Math.sin(car.angle) * car.speed;
+
+            // Collision with field boundaries
+            let left = field.x + car.width/2;
+            let right = field.x + field.width - car.width/2;
+            let top = field.y + car.height/2;
+            let bottom = field.y + field.height - car.height/2;
+
+            if (car.x < left) { car.x = left; car.speed *= -0.3; }
+            if (car.x > right) { car.x = right; car.speed *= -0.3; }
+            if (car.y < top) { car.y = top; car.speed *= -0.3; }
+            if (car.y > bottom) { car.y = bottom; car.speed *= -0.3; }
+
+            // Powerup timer
+            if (car.powerupTimer > 0) {
+                car.powerupTimer--;
+                if (car.powerupTimer === 0) {
+                    if (car.powerup === "BOOST") {
+                        car.maxSpeed -= 3;
+                        car.accel -= 0.12;
+                    }
+                    car.powerup = null;
+                }
+            }
+
+            // Powerup activation
+            if (car.powerup && car.powerupTimer === 0 && keys[activateKey]) {
+                if (car.powerup === "BOOST") {
+                    car.maxSpeed += 3;
+                    car.accel += 0.12;
+                    car.powerupTimer = 180; // 3 seconds
+                } else if (car.powerup === "SHIELD") {
+                    car.powerupTimer = 240; // 4 seconds
+                } else if (car.powerup === "MEGABALL") {
+                    ball.megaTimer = 180; // 3 seconds
+                    car.powerup = null;
+                }
+            }
+        }
+
+        function carBallCollision(car) {
+            // Find closest point on car rectangle to ball
+            let dx = ball.x - car.x;
+            let dy = ball.y - car.y;
+            let dist = Math.sqrt(dx*dx + dy*dy);
+
+            // Approximate car as circle for collision
+            let minDist = ball.radius + Math.max(car.width, car.height)/2 - 2;
+            if (dist < minDist) {
+                // Push ball away
+                let angle = Math.atan2(dy, dx);
+                let overlap = minDist - dist + 1;
+                ball.x += Math.cos(angle) * overlap;
+                ball.y += Math.sin(angle) * overlap;
+
+                // Give ball velocity based on car speed and direction
+                let impact = Math.max(2, Math.abs(car.speed));
+                let boost = (ball.megaTimer && ball.megaTimer > 0) ? 1.5 : 1;
+                ball.speedX += Math.cos(car.angle) * impact * 0.7 * boost;
+                ball.speedY += Math.sin(car.angle) * impact * 0.7 * boost;
+
+                // Clamp ball speed
+                let ballSpeed = Math.sqrt(ball.speedX*ball.speedX + ball.speedY*ball.speedY);
+                let maxBallSpeed = ball.maxSpeed + ((ball.megaTimer && ball.megaTimer > 0) ? 4 : 0);
+                if (ballSpeed > maxBallSpeed) {
+                    let scale = maxBallSpeed / ballSpeed;
+                    ball.speedX *= scale;
+                    ball.speedY *= scale;
+                }
+            }
+        }
+
+        function carCarCollision(carA, carB) {
+            // Simple circle collision
+            let dx = carA.x - carB.x;
+            let dy = carA.y - carB.y;
+            let dist = Math.sqrt(dx*dx + dy*dy);
+            let minDist = (carA.width + carB.width)/2 - 2;
+            if (dist < minDist) {
+                // If either has shield, bounce the other more
+                let shieldA = carA.powerup === "SHIELD" && carA.powerupTimer > 0;
+                let shieldB = carB.powerup === "SHIELD" && carB.powerupTimer > 0;
+                let angle = Math.atan2(dy, dx);
+                let overlap = minDist - dist + 1;
+                if (shieldA && !shieldB) {
+                    carB.x -= Math.cos(angle) * overlap * 1.5;
+                    carB.y -= Math.sin(angle) * overlap * 1.5;
+                    carA.x += Math.cos(angle) * (overlap/2);
+                    carA.y += Math.sin(angle) * (overlap/2);
+                    carB.speed = -carB.speed * 0.8;
+                } else if (shieldB && !shieldA) {
+                    carA.x += Math.cos(angle) * overlap * 1.5;
+                    carA.y += Math.sin(angle) * overlap * 1.5;
+                    carB.x -= Math.cos(angle) * (overlap/2);
+                    carB.y -= Math.sin(angle) * (overlap/2);
+                    carA.speed = -carA.speed * 0.8;
+                } else {
+                    // Push cars apart
+                    carA.x += Math.cos(angle) * (overlap/2);
+                    carA.y += Math.sin(angle) * (overlap/2);
+                    carB.x -= Math.cos(angle) * (overlap/2);
+                    carB.y -= Math.sin(angle) * (overlap/2);
+
+                    // Exchange some speed
+                    let temp = carA.speed;
+                    carA.speed = carB.speed * 0.7;
+                    carB.speed = temp * 0.7;
+                }
+            }
+        }
+
+        function updateBall() {
+            // Move ball
+            ball.x += ball.speedX;
+            ball.y += ball.speedY;
+
+            // Friction
+            ball.speedX *= ball.friction;
+            ball.speedY *= ball.friction;
+
+            // Mega Ball effect
+            if (ball.megaTimer && ball.megaTimer > 0) {
+                ball.megaTimer--;
+                ball.friction = 0.992;
+                ball.radius = 28;
+                ball.color = "#ff00cc";
+            } else {
+                ball.friction = 0.98;
+                ball.radius = 18;
+                ball.color = "#fff";
+            }
+
+            // Clamp to field
+            let left = field.x + ball.radius;
+            let right = field.x + field.width - ball.radius;
+            let top = field.y + ball.radius;
+            let bottom = field.y + field.height - ball.radius;
+
+            // Bounce off field boundaries (except goals)
+            // Left and right: allow ball to enter goal area
+            if (ball.y < top) { ball.y = top; ball.speedY *= -0.7; }
+            if (ball.y > bottom) { ball.y = bottom; ball.speedY *= -0.7; }
+
+            // Left goal
+            if (
+                ball.x - ball.radius < field.x &&
+                ball.y > field.y + (field.height - field.goalWidth)/2 &&
+                ball.y < field.y + (field.height + field.goalWidth)/2
+            ) {
+                // Goal for Blue!
+                car2.score++;
+                resetPositions(2);
+            }
+            // Right goal
+            else if (
+                ball.x + ball.radius > field.x + field.width &&
+                ball.y > field.y + (field.height - field.goalWidth)/2 &&
+                ball.y < field.y + (field.height + field.goalWidth)/2
+            ) {
+                // Goal for Red!
+                car1.score++;
+                resetPositions(1);
+            }
+            // Bounce off left/right if not in goal area
+            else {
+                if (ball.x - ball.radius < field.x) {
+                    ball.x = field.x + ball.radius;
+                    ball.speedX *= -0.7;
+                }
+                if (ball.x + ball.radius > field.x + field.width) {
+                    ball.x = field.x + field.width - ball.radius;
+                    ball.speedX *= -0.7;
+                }
+            }
+        }
+
+        function checkPowerupPickup(car) {
+            if (!powerup) return;
+            let dx = car.x - powerup.x;
+            let dy = car.y - powerup.y;
+            let dist = Math.sqrt(dx*dx + dy*dy);
+            if (dist < car.width/2 + powerup.radius) {
+                // Only one powerup at a time
+                if (!car.powerup) {
+                    car.powerup = powerup.type;
+                    powerup = null;
+                }
+            }
+        }
+
+        function resetPositions(lastGoal) {
+            // Center ball
+            ball.x = field.x + field.width / 2;
+            ball.y = field.y + field.height / 2;
+            ball.speedX = 0;
+            ball.speedY = 0;
+            ball.megaTimer = 0;
+
+            // Place cars at starting positions
+            car1.x = field.x + 120;
+            car1.y = field.y + field.height / 2;
+            car1.angle = 0;
+            car1.speed = 0;
+            car1.powerup = null;
+            car1.powerupTimer = 0;
+
+            car2.x = field.x + field.width - 120;
+            car2.y = field.y + field.height / 2;
+            car2.angle = Math.PI;
+            car2.speed = 0;
+            car2.powerup = null;
+            car2.powerupTimer = 0;
+
+            // Remove powerup
+            powerup = null;
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawField();
+            drawBall();
+            drawCar(car1);
+            drawCar(car2);
+            drawPowerup();
+        }
+
+        function update(timestamp) {
+            if (gameEnded) return;
+
+            // Timer
+            if (!lastTimestamp) lastTimestamp = timestamp;
+            let delta = (timestamp - lastTimestamp) / 1000;
+            lastTimestamp = timestamp;
+            if (matchTime > 0) {
+                matchTime -= delta;
+                if (matchTime < 0) matchTime = 0;
+            }
+
+            // Controls for each car
+            updateCar(car1, {
+                up: "ArrowUp",
+                down: "ArrowDown",
+                left: "ArrowLeft",
+                right: "ArrowRight",
+                drift: "Space"
+            }, "Enter");
+            updateCar(car2, {
+                up: "KeyW",
+                down: "KeyS",
+                left: "KeyA",
+                right: "KeyD",
+                drift: "ShiftLeft"
+            }, "ControlLeft");
+
+            // Car-car collision
+            carCarCollision(car1, car2);
+
+            // Car-ball collision
+            carBallCollision(car1);
+            carBallCollision(car2);
+
+            // Ball update
+            updateBall();
+
+            // Powerup spawn logic
+            if (!powerup && Math.random() < 0.005 && matchTime > 5) {
+                spawnPowerup();
+            }
+            if (powerup) {
+                powerupTimer++;
+                if (powerupTimer > 900) { // 15 seconds
+                    powerup = null;
+                }
+            }
+
+            // Powerup pickup
+            checkPowerupPickup(car1);
+            checkPowerupPickup(car2);
+
+            draw();
+
+            // Show speed of both cars
+            document.getElementById('speed').textContent =
+                `Red Speed: ${car1.speed.toFixed(2)} | Blue Speed: ${car2.speed.toFixed(2)}`;
+
+            // Update scores
+            document.getElementById('score1').textContent = car1.score;
+            document.getElementById('score2').textContent = car2.score;
+
+            // Show timer
+            let min = Math.floor(matchTime/60);
+            let sec = Math.floor(matchTime%60).toString().padStart(2, "0");
+            document.getElementById('timer').textContent = `Time Left: ${min}:${sec}`;
+
+            // Show powerup info
+            let info = "";
+            if (car1.powerup && car1.powerupTimer === 0) info += `<span style="color:#ff3333; text-shadow:0 0 8px #ff3333;">Red: ${car1.powerup}</span> (Press Enter) `;
+            if (car2.powerup && car2.powerupTimer === 0) info += `<span style="color:#3399ff; text-shadow:0 0 8px #3399ff;">Blue: ${car2.powerup}</span> (Press Ctrl) `;
+            if (car1.powerupTimer > 0) info += `<span style="color:#ff3333; text-shadow:0 0 8px #ff3333;">Red: ${car1.powerup} active</span> `;
+            if (car2.powerupTimer > 0) info += `<span style="color:#3399ff; text-shadow:0 0 8px #3399ff;">Blue: ${car2.powerup} active</span> `;
+            if (powerup) info += `<span>Powerup: <b style="color:${powerup.color}; text-shadow:0 0 8px ${powerup.color};">${powerup.type}</b> (${powerup.desc})</span>`;
+            document.getElementById('powerupInfo').innerHTML = info;
+
+            // End game
+            if (matchTime <= 0) {
+                gameEnded = true;
+                setTimeout(() => {
+                    let winner;
+                    if (car1.score > car2.score) winner = "Red Wins!";
+                    else if (car2.score > car1.score) winner = "Blue Wins!";
+                    else winner = "Draw!";
+                    alert(`Game Over!\n${winner}\nFinal Score: ${car1.score} : ${car2.score}`);
+                    location.reload();
+                }, 100);
+                return;
+            }
+
+            requestAnimationFrame(update);
+        }
+
+        // Start the game
+        update();
+    </script>
+</body>
+</html>
